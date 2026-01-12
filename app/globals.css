@@ -24,3 +24,17 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+.world-map-container svg {
+  fill: #e5e7eb; /* light gray */
+}
+
+.world-map-container path {
+  stroke: #111;
+  stroke-width: 0.5;
+}
+
+.world-map-container path:hover {
+  fill: #3b82f6; /* blue on hover */
+  cursor: pointer;
+}
