@@ -1,38 +1,146 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 
 interface Marker {
-  id: string;
+  regionId: string;
   label: string;
-  color?: string;
+  icon: string;
+  color: string;
+  bgColor: string;
+  x: number;
+  y: number;
 }
 
-// Define markers for different regions
-const regionMarkers: Record<string, Marker> = {
-  US: { id: 'US', label: 'United States', color: '#3b82f6' },
-  CA: { id: 'CA', label: 'Canada', color: '#22c55e' },
-  BR: { id: 'BR', label: 'Brazil', color: '#eab308' },
-  GB: { id: 'GB', label: 'United Kingdom', color: '#ef4444' },
-  FR: { id: 'FR', label: 'France', color: '#8b5cf6' },
-  DE: { id: 'DE', label: 'Germany', color: '#f97316' },
-  IN: { id: 'IN', label: 'India', color: '#06b6d4' },
-  CN: { id: 'CN', label: 'China', color: '#ec4899' },
-  AU: { id: 'AU', label: 'Australia', color: '#14b8a6' },
-  JP: { id: 'JP', label: 'Japan', color: '#f43f5e' },
-  RU: { id: 'RU', label: 'Russia', color: '#6366f1' },
-};
+const markers: Marker[] = [
+  { regionId: 'US', label: 'United States', icon: 'US', color: '#fff', bgColor: '#1e3a5f', x: 180, y: 320 },
+  { regionId: 'CA', label: 'Canada', icon: 'CA', color: '#fff', bgColor: '#7c2d12', x: 200, y: 220 },
+  { regionId: 'BR', label: 'Brazil', icon: 'BR', color: '#fff', bgColor: '#166534', x: 330, y: 470 },
+  { regionId: 'GB', label: 'United Kingdom', icon: 'GB', color: '#fff', bgColor: '#7c3aed', x: 468, y: 280 },
+  { regionId: 'FR', label: 'France', icon: 'FR', color: '#fff', bgColor: '#1d4ed8', x: 480, y: 315 },
+  { regionId: 'DE', label: 'Germany', icon: 'DE', color: '#fff', bgColor: '#374151', x: 505, y: 295 },
+  { regionId: 'IN', label: 'India', icon: 'IN', color: '#fff', bgColor: '#c2410c', x: 700, y: 390 },
+  { regionId: 'CN', label: 'China', icon: 'CN', color: '#fff', bgColor: '#b91c1c', x: 770, y: 340 },
+  { regionId: 'AU', label: 'Australia', icon: 'AU', color: '#fff', bgColor: '#0369a1', x: 870, y: 510 },
+  { regionId: 'JP', label: 'Japan', icon: 'JP', color: '#fff', bgColor: '#be123c', x: 870, y: 320 },
+  { regionId: 'RU', label: 'Russia', icon: 'RU', color: '#fff', bgColor: '#4338ca', x: 700, y: 220 },
+];
+
+const originalViewBox = { x: 0, y: 0, width: 1009.6727, height: 665.96301 };
 
 export default function WorldMap() {
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
-  const [viewBox, setViewBox] = useState({ x: 0, y: 0, width: 1009.6727, height: 665.96301 });
+  const currentViewBoxRef = useRef({ ...originalViewBox });
+  const selectedRegionRef = useRef<string | null>(null);
+  const animationRef = useRef<number | null>(null);
   const [isZoomed, setIsZoomed] = useState(false);
   const [selectedRegion, setSelectedRegion] = useState<string | null>(null);
-  const animationRef = useRef<number | null>(null);
 
-  // Original viewBox dimensions from the SVG
-  const originalViewBox = { x: 0, y: 0, width: 1009.6727, height: 665.96301 };
+  const animateViewBox = useCallback((to: typeof originalViewBox, duration: number) => {
+    if (animationRef.current) {
+      cancelAnimationFrame(animationRef.current);
+    }
+
+    const from = { ...currentViewBoxRef.current };
+    const startTime = performance.now();
+
+    const animate = (currentTime: number) => {
+      const elapsed = currentTime - startTime;
+      const progress = Math.min(elapsed / duration, 1);
+      const eased = 1 - Math.pow(1 - progress, 3);
+
+      const current = {
+        x: from.x + (to.x - from.x) * eased,
+        y: from.y + (to.y - from.y) * eased,
+        width: from.width + (to.width - from.width) * eased,
+        height: from.height + (to.height - from.height) * eased,
+      };
+
+      currentViewBoxRef.current = current;
+
+      if (svgRef.current) {
+        svgRef.current.setAttribute('viewBox', `${current.x} ${current.y} ${current.width} ${current.height}`);
+      }
+
+      if (progress < 1) {
+        animationRef.current = requestAnimationFrame(animate);
+      }
+    };
+
+    animationRef.current = requestAnimationFrame(animate);
+  }, []);
+
+  const zoomToRegion = useCallback((regionId: string) => {
+    // Use ref to check current selection (avoids stale closure)
+    if (!svgRef.current || regionId === selectedRegionRef.current) return;
+    
+    const path = svgRef.current.querySelector(`path#${regionId}`) as SVGPathElement;
+    if (!path) {
+      console.log('Path not found for:', regionId);
+      return;
+    }
+
+    const bbox = path.getBBox();
+    
+    // For large countries, use a minimum zoom level
+    const minZoom = 1.5;
+    
+    // Calculate zoom based on region size
+    const padding = Math.max(bbox.width, bbox.height) * 0.3;
+    const targetWidth = bbox.width + padding * 2;
+    const targetHeight = bbox.height + padding * 2;
+    
+    const zoomX = originalViewBox.width / targetWidth;
+    const zoomY = originalViewBox.height / targetHeight;
+    
+    // Ensure at least minZoom, cap at 6
+    const zoom = Math.max(minZoom, Math.min(zoomX, zoomY, 6));
+    
+    let newWidth = originalViewBox.width / zoom;
+    let newHeight = originalViewBox.height / zoom;
+    
+    const centerX = bbox.x + bbox.width / 2;
+    const centerY = bbox.y + bbox.height / 2;
+    
+    let newX = centerX - newWidth / 2;
+    let newY = centerY - newHeight / 2;
+
+    // Constrain to map bounds
+    newX = Math.max(0, Math.min(newX, originalViewBox.width - newWidth));
+    newY = Math.max(0, Math.min(newY, originalViewBox.height - newHeight));
+
+    // Ensure dimensions don't exceed original
+    newWidth = Math.min(newWidth, originalViewBox.width);
+    newHeight = Math.min(newHeight, originalViewBox.height);
+
+    animateViewBox({ x: newX, y: newY, width: newWidth, height: newHeight }, 800);
+
+    // Update both ref and state
+    selectedRegionRef.current = regionId;
+    setIsZoomed(true);
+    setSelectedRegion(regionId);
+
+    // Update highlighting
+    svgRef.current.querySelectorAll('path').forEach(p => {
+      p.style.fill = '';
+    });
+    const marker = markers.find(m => m.regionId === regionId);
+    path.style.fill = marker?.bgColor || '#4f83ff';
+  }, [animateViewBox]);
+
+  const resetZoom = useCallback(() => {
+    animateViewBox({ ...originalViewBox }, 600);
+    selectedRegionRef.current = null;
+    setIsZoomed(false);
+    setSelectedRegion(null);
+
+    if (svgRef.current) {
+      svgRef.current.querySelectorAll('path').forEach(p => {
+        p.style.fill = '';
+      });
+    }
+  }, [animateViewBox]);
 
   useEffect(() => {
     fetch('/svg/world-map.svg')
@@ -45,12 +153,50 @@ export default function WorldMap() {
         if (!svg) return;
 
         svgRef.current = svg;
-
-        // Set initial viewBox
         svg.setAttribute('viewBox', `${originalViewBox.x} ${originalViewBox.y} ${originalViewBox.width} ${originalViewBox.height}`);
         svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+        currentViewBoxRef.current = { ...originalViewBox };
 
-        // Add click handlers to all paths (regions)
+        // Create markers group
+        const markersGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        markersGroup.setAttribute('class', 'markers-group');
+        svg.appendChild(markersGroup);
+
+        // Add markers
+        markers.forEach(marker => {
+          const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+          g.setAttribute('class', 'map-marker');
+          g.setAttribute('data-region', marker.regionId);
+          g.style.cursor = 'pointer';
+
+          const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+          circle.setAttribute('cx', String(marker.x));
+          circle.setAttribute('cy', String(marker.y));
+          circle.setAttribute('r', '12');
+          circle.setAttribute('fill', marker.bgColor);
+          circle.setAttribute('stroke', '#fff');
+          circle.setAttribute('stroke-width', '1.5');
+
+          const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+          text.setAttribute('x', String(marker.x));
+          text.setAttribute('y', String(marker.y + 3));
+          text.setAttribute('text-anchor', 'middle');
+          text.setAttribute('font-size', '8');
+          text.setAttribute('fill', '#fff');
+          text.setAttribute('font-weight', 'bold');
+          text.textContent = marker.icon;
+
+          g.appendChild(circle);
+          g.appendChild(text);
+          markersGroup.appendChild(g);
+
+          g.addEventListener('click', (e) => {
+            e.stopPropagation();
+            zoomToRegion(marker.regionId);
+          });
+        });
+
+        // Path click handlers
         svg.querySelectorAll('path').forEach(path => {
           path.style.cursor = 'pointer';
           path.style.transition = 'fill 0.2s ease';
@@ -58,23 +204,25 @@ export default function WorldMap() {
           path.addEventListener('click', (e) => {
             e.stopPropagation();
             const regionId = path.getAttribute('id') || '';
-            handleRegionClick(path, regionId);
+            zoomToRegion(regionId);
           });
 
           path.addEventListener('mouseenter', () => {
-            if (!isZoomed || path.getAttribute('id') !== selectedRegion) {
+            const regionId = path.getAttribute('id') || '';
+            if (regionId !== selectedRegionRef.current) {
               path.style.fill = '#4f83ff';
             }
           });
 
           path.addEventListener('mouseleave', () => {
-            if (!isZoomed || path.getAttribute('id') !== selectedRegion) {
+            const regionId = path.getAttribute('id') || '';
+            if (regionId !== selectedRegionRef.current) {
               path.style.fill = '';
             }
           });
         });
 
-        // Click on background to reset
+        // Background click to reset
         svg.addEventListener('click', (e) => {
           if (e.target === svg) {
             resetZoom();
@@ -87,116 +235,29 @@ export default function WorldMap() {
         cancelAnimationFrame(animationRef.current);
       }
     };
-  }, []);
+  }, [zoomToRegion, resetZoom]);
 
-  const handleRegionClick = (path: SVGPathElement, regionId: string) => {
-    const bbox = path.getBBox();
+  useEffect(() => {
+    if (!svgRef.current) return;
     
-    // Calculate zoom level based on region size
-    const padding = 20;
-    const targetWidth = bbox.width + padding * 2;
-    const targetHeight = bbox.height + padding * 2;
-    
-    // Determine zoom to fit the region nicely (with some context)
-    const zoomX = originalViewBox.width / targetWidth;
-    const zoomY = originalViewBox.height / targetHeight;
-    const zoom = Math.min(zoomX, zoomY, 8); // Cap at 8x zoom
-    
-    const newWidth = originalViewBox.width / zoom;
-    const newHeight = originalViewBox.height / zoom;
-    
-    // Center on the clicked region
-    const centerX = bbox.x + bbox.width / 2;
-    const centerY = bbox.y + bbox.height / 2;
-    
-    const newX = centerX - newWidth / 2;
-    const newY = centerY - newHeight / 2;
+    svgRef.current.querySelectorAll('path').forEach(path => {
+      const regionId = path.getAttribute('id') || '';
+      path.style.cursor = regionId === selectedRegion ? 'default' : 'pointer';
+    });
+  }, [selectedRegion]);
 
-    animateViewBox(
-      { ...viewBox },
-      { x: newX, y: newY, width: newWidth, height: newHeight },
-      800
-    );
-
-    setIsZoomed(true);
-    setSelectedRegion(regionId);
-
-    // Highlight the selected region
-    if (svgRef.current) {
-      svgRef.current.querySelectorAll('path').forEach(p => {
-        p.style.fill = '';
-      });
-      path.style.fill = regionMarkers[regionId]?.color || '#4f83ff';
-    }
-  };
-
-  const resetZoom = () => {
-    animateViewBox(
-      { ...viewBox },
-      { ...originalViewBox },
-      600
-    );
-    setIsZoomed(false);
-    setSelectedRegion(null);
-
-    // Reset all fills
-    if (svgRef.current) {
-      svgRef.current.querySelectorAll('path').forEach(p => {
-        p.style.fill = '';
-      });
-    }
-  };
-
-  const animateViewBox = (
-    from: typeof viewBox,
-    to: typeof viewBox,
-    duration: number
-  ) => {
-    if (animationRef.current) {
-      cancelAnimationFrame(animationRef.current);
-    }
-
-    const startTime = performance.now();
-
-    const animate = (currentTime: number) => {
-      const elapsed = currentTime - startTime;
-      const progress = Math.min(elapsed / duration, 1);
-      
-      // Easing function (ease-out cubic)
-      const eased = 1 - Math.pow(1 - progress, 3);
-
-      const current = {
-        x: from.x + (to.x - from.x) * eased,
-        y: from.y + (to.y - from.y) * eased,
-        width: from.width + (to.width - from.width) * eased,
-        height: from.height + (to.height - from.height) * eased,
-      };
-
-      if (svgRef.current) {
-        svgRef.current.setAttribute('viewBox', `${current.x} ${current.y} ${current.width} ${current.height}`);
-      }
-      setViewBox(current);
-
-      if (progress < 1) {
-        animationRef.current = requestAnimationFrame(animate);
-      }
-    };
-
-    animationRef.current = requestAnimationFrame(animate);
-  };
+  const currentMarker = markers.find(m => m.regionId === selectedRegion);
 
   return (
     <div className="map-container">
       <div ref={containerRef} className="map-svg" />
-      {selectedRegion && regionMarkers[selectedRegion] && (
-        <div className="region-info">
-          <span 
-            className="marker-dot" 
-            style={{ backgroundColor: regionMarkers[selectedRegion].color }}
-          />
-          {regionMarkers[selectedRegion].label}
+
+      {selectedRegion && currentMarker && (
+        <div className="region-banner" key={selectedRegion}>
+          <span className="banner-text">{currentMarker.label}</span>
         </div>
       )}
+
       {isZoomed && (
         <button className="reset-btn" onClick={resetZoom}>
           Reset View
